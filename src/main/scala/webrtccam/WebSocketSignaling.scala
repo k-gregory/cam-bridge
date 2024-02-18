@@ -20,6 +20,7 @@ class WebSocketSignaling[F[_]: Async](gst: Gst[F]) {
     x <- response match {
       case Left(input @ WebSocketFrame.Text (x, _) ) =>
         import io.circe.parser._
+        println(x)
         val wspF= decode[WebRtcMessage](x).toOption.get match
           case PingPong =>
             import cats.syntax.all.*
@@ -27,9 +28,9 @@ class WebSocketSignaling[F[_]: Async](gst: Gst[F]) {
           case msg @ IceCandidate(candidate, mLineIdx) =>
             println(s"Got candidate from browser: $candidate, $mLineIdx")
             fs2.Stream.eval(wsp.addBrowserIceCandidate(msg)) *> fs2.Stream.empty
-          case Offer(data) =>
-            println(s"Got answer from browser: $data")
-            fs2.Stream.eval(wsp.setSdp(data)) *> fs2.Stream.empty
+          case Offer(offerType, data) =>
+            println(s"Got $offerType from browser: $data")
+            fs2.Stream.eval(wsp.setSdp(offerType, data)) *> fs2.Stream.empty
         import io.circe.syntax._
         wspF.flatMap(fs2.Stream.eval).map(_.asJson.toString).map(WebSocketFrame.Text(_))
 

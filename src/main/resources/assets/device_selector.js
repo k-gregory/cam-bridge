@@ -26,13 +26,14 @@ class WebsocketWebrtc {
       console.log("Got Offer from remote", msg.Offer)
       this.initRtc();
       await this.pc.setRemoteDescription({
-        type: 'offer',
+        type: msg.Offer.type,
         sdp: msg.Offer.data
       });
 
       const answer = await this.pc.createAnswer();
+      console.log("Constructed answer", answer);
       this.send({
-        Offer: { data: answer.sdp }
+        Offer: { type: "answer", data: answer.sdp }
       });
       await this.pc.setLocalDescription(answer);
     }
@@ -57,10 +58,11 @@ class WebsocketWebrtc {
   }
 
   send(msg) {
+    console.log(this.conn);
     this.conn.send(JSON.stringify(msg));
   }
 
-  initRtc() {
+  async initRtc() {
     this.pc = new RTCPeerConnection();
     window.pc = this.pc;
     this.pc.onicecandidate = this.onIceCandidate.bind(this);
@@ -71,7 +73,12 @@ class WebsocketWebrtc {
         this.onVideoStream(track.streams[0])
       }
     }
-    this.localStream.getVideoTracks().forEach(track => this.pc.addTrack(track, this.localStream));    
+    this.localStream.getVideoTracks().forEach(track => this.pc.addTrack(track, this.localStream));
+
+    const offer = await this.pc.createOffer();
+    this.send({
+      Offer: {type: "offer", data: offer.sdp}
+    });
   }
 
   constructor(onVideoStream, localStream) {
@@ -84,6 +91,8 @@ class WebsocketWebrtc {
     this.onVideoStream = onVideoStream;  
     console.log("constructed with localStream", localStream);
     this.localStream = localStream;
+
+    setTimeout(() => this.initRtc(), 1000)    
   }
 }
 

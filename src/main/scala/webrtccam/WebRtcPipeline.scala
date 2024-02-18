@@ -8,9 +8,9 @@ import cats.effect.{Async, Sync}
 import cats.syntax.all.*
 import org.freedesktop.gstreamer.Element.PAD_ADDED
 import org.freedesktop.gstreamer.elements.DecodeBin
-import org.freedesktop.gstreamer.webrtc.WebRTCBin.{CREATE_OFFER, ON_ICE_CANDIDATE, ON_NEGOTIATION_NEEDED}
+import org.freedesktop.gstreamer.webrtc.WebRTCBin.{CREATE_ANSWER, CREATE_OFFER, ON_ICE_CANDIDATE, ON_NEGOTIATION_NEEDED}
 import org.freedesktop.gstreamer.webrtc.{WebRTCBin, WebRTCSDPType, WebRTCSessionDescription}
-import org.freedesktop.gstreamer.{Bus, Caps, ElementFactory, GstObject, PadDirection, Pipeline, SDPMessage}
+import org.freedesktop.gstreamer.{Bus, Caps, Element, ElementFactory, GstObject, PadDirection, Pipeline, SDPMessage}
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import webrtccam.data.{IceCandidate, Offer, WebRtcMessage}
@@ -57,19 +57,33 @@ class WebRtcPipeline[F[_]: Sync] private(pipe: Pipeline, webrtc: WebRTCBin, outp
   }
 
 
-  def setSdp(sdp: String): F[Unit] = {
+  def setSdp(offerType: String, sdp: String): F[Unit] = {
     val sdpMessage = new SDPMessage()
     sdpMessage.parseBuffer(sdp)
-    val sdpDescription = new WebRTCSessionDescription(WebRTCSDPType.ANSWER, sdpMessage)
+    val sdpDescription = new WebRTCSessionDescription(offerType match
+      case "answer" => WebRTCSDPType.ANSWER
+      case "offer" => WebRTCSDPType.OFFER
+      ,
+      sdpMessage)
 
-    Sync[F].delay(webrtc.setRemoteDescription(sdpDescription))
+    Sync[F].delay{
+      webrtc.setRemoteDescription(sdpDescription)
+      if(offerType == "offer") pipe.play()
+    }
+  }
+
+  val onAnswerCreated: CREATE_ANSWER  = { answer =>
+    val msg = answer.getSDPMessage.toString
+    println(s"Answer was created: '${msg.take(10)}'")
+    webrtc.setLocalDescription(answer)
+    unsafeOutput(Offer("answer", msg))
   }
 
   val onOfferCreated: CREATE_OFFER = { offer =>
     val msg = offer.getSDPMessage.toString
     println(s"Offer was created: '${msg.take(10)}'")
     webrtc.setLocalDescription(offer)
-    unsafeOutput(Offer(msg))
+    unsafeOutput(Offer("offer", msg))
     // TODO: Send offer to Websocket
     /*
             ObjectNode rootNode = mapper.createObjectNode();
@@ -87,7 +101,9 @@ class WebRtcPipeline[F[_]: Sync] private(pipe: Pipeline, webrtc: WebRTCBin, outp
 
     // When webrtcbin has created the offer, it will hit our callback and we
     // send SDP offer over the websocket to signalling server
-    webrtc.createOffer(onOfferCreated)
+
+    webrtc.createAnswer(onAnswerCreated)
+    //webrtc.createOffer(onOfferCreated)
   }
 
   val onIceCandidate: ON_ICE_CANDIDATE =  (sdpMLineIndex, candidate) => {
@@ -173,9 +189,6 @@ class WebRtcPipeline[F[_]: Sync] private(pipe: Pipeline, webrtc: WebRTCBin, outp
 
     setupPipeLogging()
 
-    val changeReturn = pipe.play()
-    println(s"Play: $changeReturn")
-
     ().pure[F]
   }
 }
@@ -183,10 +196,13 @@ class WebRtcPipeline[F[_]: Sync] private(pipe: Pipeline, webrtc: WebRTCBin, outp
 object WebRtcPipeline {
   implicit def logger[F[_]: Sync]: Logger[F] = Slf4jLogger.getLogger[F]
 
-  private val pipelineDescription = "videotestsrc is-live=true pattern=ball ! videoconvert ! queue ! vp8enc deadline=1 ! rtpvp8pay"
-    + " ! queue ! application/x-rtp,media=video,encoding-name=VP8,payload=97 ! webrtcbin. "
+  private val pipelineDescription =
+    ""
+    //"videotestsrc is-live=true pattern=ball ! videoconvert ! queue ! vp8enc deadline=1 ! rtpvp8pay"
+    // " ! queue ! application/x-rtp,media=video,encoding-name=VP8,payload=97 ! webrtcbin. "
     //+ "audiotestsrc is-live=true wave=sine ! audioconvert ! audioresample ! queue ! opusenc ! rtpopuspay"
     //+ " ! queue ! application/x-rtp,media=audio,encoding-name=OPUS,payload=96 ! webrtcbin. "
+    //"queue ! webrtcbin . "
     + "webrtcbin name=webrtcbin bundle-policy=max-bundle ";
     //+ "webrtcbin name=webrtcbin bundle-policy=max-bundle stun-server=stun://stun.l.google.com:19302 ";
 
