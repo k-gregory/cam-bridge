@@ -24,18 +24,11 @@ class WebsocketWebrtc {
 
     if (msg.Offer) {
       console.log("Got Offer from remote", msg.Offer)
-      this.initRtc();
+
       await this.pc.setRemoteDescription({
         type: msg.Offer.type,
         sdp: msg.Offer.data
       });
-
-      const answer = await this.pc.createAnswer();
-      console.log("Constructed answer", answer);
-      this.send({
-        Offer: { type: "answer", data: answer.sdp }
-      });
-      await this.pc.setLocalDescription(answer);
     }
 
     if(msg.IceCandidate) {
@@ -76,6 +69,7 @@ class WebsocketWebrtc {
     this.localStream.getVideoTracks().forEach(track => this.pc.addTrack(track, this.localStream));
 
     const offer = await this.pc.createOffer();
+    this.pc.setLocalDescription({type: "offer", sdp: offer.sdp});
     this.send({
       Offer: {type: "offer", data: offer.sdp}
     });
@@ -130,7 +124,7 @@ class LikeButton extends React.Component {
   }
 
   async changeDevice(newDevice) {
-    console.log(newDevice);
+    console.log("Change device", newDevice);
 
     var newConstraints = {}
     try {
@@ -161,7 +155,7 @@ class LikeButton extends React.Component {
 
     switch (device.kind) {
       case "videoinput":
-        console.log("got video input")
+        console.log("got video input", device)
         newConstraints = {
           video: {
             deviceId: {
@@ -202,22 +196,21 @@ class LikeButton extends React.Component {
     }
   }
 
-  async deviceInitialization() {
-    try {
+  async deviceInitialization() {    
       const devices = await navigator.mediaDevices.enumerateDevices()
       const deviceLabels = [];
       console.log("Devices list:", devices);
 
       for (const device of devices) {
+        try {
         const [id, label] = await this.queryDevice(device)
         deviceLabels[id] = label;
+        } catch (e) {
+          console.error(e);
+        }
       }
 
       this.setState({ devices, deviceLabels });
-
-    } catch (e) {
-      handleError(e);
-    }
   }
 
   render() {
@@ -258,9 +251,11 @@ const root = ReactDOM.createRoot(domContainer);
 root.render(e(LikeButton));
 
 function handleError(error) {
+  console.error(error);
   if (error.name === 'OverconstrainedError') {
     const v = constraints.video;
-    errorMsg(`The resolution ${v.width.exact}x${v.height.exact} px is not supported by your device.`);
+    console.error(error);
+    errorMsg(`The resolution ${v.width}x${v.height} px is not supported by your device.`);
   } else if (error.name === 'NotAllowedError') {
     errorMsg('Permissions have not been granted to use your camera and ' +
       'microphone, you need to allow the page access to your devices in ' +
@@ -270,6 +265,7 @@ function handleError(error) {
 }
 
 function errorMsg(msg, error) {
+  console.error(error);
   const errorElement = document.querySelector('#errorMsg');
   errorElement.innerHTML += `<p>${msg}</p>`;
   if (typeof error !== 'undefined') {

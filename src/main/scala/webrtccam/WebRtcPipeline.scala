@@ -15,6 +15,8 @@ import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import webrtccam.data.{IceCandidate, Offer, WebRtcMessage}
 
+import scala.concurrent.Future
+
 
 class WebRtcPipeline[F[_]: Sync] private(pipe: Pipeline, webrtc: WebRTCBin, output: Queue[F, Option[WebRtcMessage]], dispatcher: Dispatcher[F]) {
   import WebRtcPipeline.*
@@ -68,32 +70,14 @@ class WebRtcPipeline[F[_]: Sync] private(pipe: Pipeline, webrtc: WebRTCBin, outp
 
     Sync[F].delay{
       webrtc.setRemoteDescription(sdpDescription)
-      if(offerType == "offer") pipe.play()
     }
   }
 
   val onAnswerCreated: CREATE_ANSWER  = { answer =>
     val msg = answer.getSDPMessage.toString
-    println(s"Answer was created: '${msg.take(10)}'")
+    println(s"Answer was created: '${msg}'")
     webrtc.setLocalDescription(answer)
     unsafeOutput(Offer("answer", msg))
-  }
-
-  val onOfferCreated: CREATE_OFFER = { offer =>
-    val msg = offer.getSDPMessage.toString
-    println(s"Offer was created: '${msg.take(10)}'")
-    webrtc.setLocalDescription(offer)
-    unsafeOutput(Offer("offer", msg))
-    // TODO: Send offer to Websocket
-    /*
-            ObjectNode rootNode = mapper.createObjectNode();
-            ObjectNode sdpNode = mapper.createObjectNode();
-            sdpNode.put("type", "offer");
-            sdpNode.put("sdp", offer.getSDPMessage().toString());
-            rootNode.set("sdp", sdpNode);
-            String json = mapper.writeValueAsString(rootNode);
-            LOG.info(() -> "Sending offer:\n" + json);
-     */
   }
 
   val onNegotiationNeeded: ON_NEGOTIATION_NEEDED = { elem =>
@@ -102,30 +86,16 @@ class WebRtcPipeline[F[_]: Sync] private(pipe: Pipeline, webrtc: WebRTCBin, outp
     // When webrtcbin has created the offer, it will hit our callback and we
     // send SDP offer over the websocket to signalling server
 
-    webrtc.createAnswer(onAnswerCreated)
+    Future {
+      Thread.sleep(2000)
+      webrtc.createAnswer(onAnswerCreated)
+    }(scala.concurrent.ExecutionContext.global)
     //webrtc.createOffer(onOfferCreated)
   }
 
   val onIceCandidate: ON_ICE_CANDIDATE =  (sdpMLineIndex, candidate) => {
     println(s"New ICE Candidate: $sdpMLineIndex, $candidate")
     unsafeOutput(IceCandidate(candidate, sdpMLineIndex))
-
-    // TODO: Send ICE candidate to websocket
-    /*
-    ObjectNode rootNode = mapper.createObjectNode();
-    ObjectNode iceNode = mapper.createObjectNode();
-    iceNode.put("candidate", candidate);
-    iceNode.put("sdpMLineIndex", sdpMLineIndex);
-    rootNode.set("ice", iceNode);
-
-    try {
-        String json = mapper.writeValueAsString(rootNode);
-        LOG.info(() -> "ON_ICE_CANDIDATE: " + json);
-        websocket.sendTextFrame(json);
-    } catch (JsonProcessingException e) {
-        LOG.log(Level.SEVERE, "Couldn't write JSON", e);
-    }
-     */
   };
 
   val onIncomingStream: PAD_ADDED =  (element, pad) => {
@@ -180,14 +150,14 @@ class WebRtcPipeline[F[_]: Sync] private(pipe: Pipeline, webrtc: WebRTCBin, outp
 
 
   def run[F[_]: Applicative](): F[Unit] = {
-    // When the pipeline goes to PLAYING, the on_negotiation_needed() callback
-    // will be called, and we will ask webrtcbin to create an offer which will
-    // match the pipeline above.
     webrtc.connect(onNegotiationNeeded)
     webrtc.connect(onIceCandidate)
     webrtc.connect(onIncomingStream)
 
     setupPipeLogging()
+
+    val changeReturn = pipe.play()
+    println(changeReturn)
 
     ().pure[F]
   }
