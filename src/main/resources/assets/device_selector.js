@@ -7,73 +7,78 @@ const constraints = window.constraints = {
 
 const e = React.createElement;
 
-var conn = new WebSocket('wss://localhost:8443/signaling');
+var i = 0;
 
-function send(message) {
-  conn.send(JSON.stringify(message));
-}
+class WebsocketWebrtc {
+  async onMessage(message) {
+    const msg = JSON.parse(message.data);
+    console.log("Got from WS ", msg)
 
-conn.onmessage = (msg)=>console.log("got message from ws: ", JSON.parse(msg.data));
-
-var  i = 0;
-
-class LikeButton extends React.Component {
-  startWebrtc() {
-
-
-    var configuration = {};
-    var peerConnection = new RTCPeerConnection(configuration);
-
-    var dataChannel = peerConnection.createDataChannel("dataChannel", { reliable: true });
-
-    dataChannel.onerror = function (error) {
-      console.log("Error:", error);
-    };
-
-    dataChannel.onclose = function () {
-      console.log("Data channel is closed");
-    };
-
-    peerConnection.createOffer(function (offer) {
-      console.log("Creating offer");
-      send({
-        event: "offer",
-        data: offer
+    if (msg.Offer) {
+      console.log("Got Offer from remote", msg.Offer)
+      this.initRtc();
+      await this.pc.setRemoteDescription({
+        type: 'offer',
+        sdp: msg.Offer.data
       });
-      peerConnection.setLocalDescription(offer);
-    }, function (error) {
-      console.log("Can't create offer", error)
-    });
 
-    peerConnection.onicecandidate = function (event) {
-      if (event.candidate) {
-        send({
-          event: "candidate",
-          data: event.candidate
-        });
-      }
-    };
-
-    return;
-    peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-    peerConnection.createAnswer(function (answer) {
-      peerConnection.setLocalDescription(answer);
-      send({
-        event: "answer",
-        data: answer
+      const answer = await this.pc.createAnswer();
+      this.send({
+        Offer: { data: answer.sdp }
       });
-    }, function (error) {
-      console.log("Can't create answer", error)
-    });
-
-    function handleAnswer(answer){
-        peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+      await this.pc.setLocalDescription(answer);
     }
 
-    dataChannel.onmessage = function(event) {
-        console.log("Message:", event.data);
-    };
+    if(msg.IceCandidate) {
+      console.log("Got ice candidate from remote", msg.IceCandidate)
 
+      await this.pc.addIceCandidate({
+        sdpMLineIndex: msg.IceCandidate.mLineIdx,
+        candidate: msg.IceCandidate.sdp
+      });
+    }
+  }
+
+  onIceCandidate(candidate0) {
+    const candidate = candidate0.candidate;
+    console.log("Got ice candidate", candidate0, candidate);    
+    this.send({ IceCandidate: {
+      mLineIdx: candidate.sdpMLineIndex,
+      sdp: candidate.candidate
+    }});
+  }
+
+  send(msg) {
+    this.conn.send(JSON.stringify(msg));
+  }
+
+  initRtc() {
+    this.pc = new RTCPeerConnection();
+    window.pc = this.pc;
+    this.pc.onicecandidate = this.onIceCandidate.bind(this);
+    this.pc.ondatachannel = (chan) => {
+      console.log("Data channel", chan);
+    }
+    this.pc.ontrack = (track) => {
+      console.log("Track", track);
+      console.log("Track kind", track.track.kind)
+      if(track.track.kind == "video") {
+        this.onVideoStream(track.streams[0])
+      }
+    }
+  }
+
+  constructor(onVideoStream) {
+    this.conn = new WebSocket(`wss://${window.location.host}/signaling`);
+    this.conn.onmessage = this.onMessage.bind(this);
+    this.pc = null;
+    this.onVideoStream = onVideoStream;
+  }
+}
+
+class LikeButton extends React.Component {
+  async startWebrtc() {
+    this.webrtc = new WebsocketWebrtc((video) => this.videoRef.current.srcObject = video);
   }
 
   constructor(props) {
@@ -85,6 +90,8 @@ class LikeButton extends React.Component {
       deviceName: null,
       deviceLabels: {}
     };
+    this.webrtc = null;
+    this.videos = [];
   }
 
   handleSuccess(stream) {
@@ -213,7 +220,7 @@ class LikeButton extends React.Component {
       ),
       e('button', { onClick: () => this.deviceInitialization() }, 'Device initialization',),
       e('button', { onClick: () => this.startWebrtc() }, 'Start WebRTC',),
-      e('button', { onClick: () => send({data: "I'm sending something", i: i++}) }, 'Send something',),
+      e('button', { onClick: () => send({ data: "I'm sending something", i: i++ }) }, 'Send something',),
       e('video', {
         ref: this.videoRef,
         'autoPlay': 1,

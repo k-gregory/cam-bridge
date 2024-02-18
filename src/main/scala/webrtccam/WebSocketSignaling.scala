@@ -2,8 +2,10 @@ package webrtccam
 
 import cats.effect.{IO, Sync}
 import cats.effect.kernel.{Async, Ref}
+import cats.implicits.catsSyntaxApplyOps
 import fs2.Pipe
 import org.http4s.websocket.WebSocketFrame
+import webrtccam.data.{IceCandidate, Offer, WebRtcMessage}
 
 class WebSocketSignaling[F[_]: Async](gst: Gst[F]) {
   def pipe: Pipe[F, WebSocketFrame, WebSocketFrame] = stream => for {
@@ -16,9 +18,16 @@ class WebSocketSignaling[F[_]: Async](gst: Gst[F]) {
     response <- inputs.mergeHaltBoth(outputs)
 
     x <- response match {
-      case Left(input @ WebSocketFrame.Text (x) ) =>
-        println(s"Got $x")
-        fs2.Stream.emit (input)
+      case Left(input @ WebSocketFrame.Text (x, _) ) =>
+        import io.circe.parser._
+        val wspF= decode[WebRtcMessage](x).toOption.get match
+          case msg @ IceCandidate(candidate, mLineIdx) =>
+            println(s"Got candidate from browser: $candidate, $mLineIdx")
+            wsp.addBrowserIceCandidate(msg)
+          case Offer(data) =>
+            println(s"Got answer from browser: $data")
+            wsp.setSdp(data)
+        fs2.Stream.eval(wspF) *> fs2.Stream.empty
 
       case Right(output) =>
         import io.circe.syntax._

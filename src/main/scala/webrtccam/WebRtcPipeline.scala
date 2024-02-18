@@ -10,7 +10,7 @@ import org.freedesktop.gstreamer.Element.PAD_ADDED
 import org.freedesktop.gstreamer.elements.DecodeBin
 import org.freedesktop.gstreamer.webrtc.WebRTCBin.{CREATE_OFFER, ON_ICE_CANDIDATE, ON_NEGOTIATION_NEEDED}
 import org.freedesktop.gstreamer.webrtc.{WebRTCBin, WebRTCSDPType, WebRTCSessionDescription}
-import org.freedesktop.gstreamer.{Caps, ElementFactory, PadDirection, Pipeline, SDPMessage}
+import org.freedesktop.gstreamer.{Bus, Caps, ElementFactory, GstObject, PadDirection, Pipeline, SDPMessage}
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import webrtccam.data.{IceCandidate, Offer, WebRtcMessage}
@@ -24,6 +24,39 @@ class WebRtcPipeline[F[_]: Sync] private(pipe: Pipeline, webrtc: WebRTCBin, outp
   private def unsafeOutput(msg: WebRtcMessage): Unit = dispatcher.unsafeRunAndForget(output.offer(Some(msg)))
   private def stopOutput = dispatcher.unsafeRunAndForget(output.offer(None))
 
+  def addBrowserIceCandidate(msg: IceCandidate): F[Unit] = {
+    println(s"Adding browser ICE candidate $msg")
+    Sync[F].blocking {
+      webrtc.addIceCandidate(msg.mLineIdx, msg.sdp)
+    }
+  }
+
+  private def setupPipeLogging(): Unit = {
+    val bus = pipe.getBus
+
+    val eos: Bus.EOS =  source => {
+      println(s"Reached end of stream $source")
+      //endCall();
+    }
+
+    val error: Bus.ERROR = (source, code, message) => {
+      println(s"Error from source $source with code $code and message $message")
+      //endCall();
+    };
+
+    bus.connect(eos)
+    bus.connect(error)
+
+
+
+    bus.connect((source, old, current, pending) => {
+      if (source.isInstanceOf[Pipeline]) {
+        println(s"Pipe state changed from $old to $current")
+      }
+    });
+  }
+
+
   def setSdp(sdp: String): F[Unit] = {
     val sdpMessage = new SDPMessage()
     sdpMessage.parseBuffer(sdp)
@@ -32,9 +65,9 @@ class WebRtcPipeline[F[_]: Sync] private(pipe: Pipeline, webrtc: WebRTCBin, outp
     Sync[F].delay(webrtc.setRemoteDescription(sdpDescription))
   }
 
-  val onOfferCreated: CREATE_OFFER = {offer =>
+  val onOfferCreated: CREATE_OFFER = { offer =>
     val msg = offer.getSDPMessage.toString
-    println(s"Offer was created: $msg")
+    println(s"Offer was created: '${msg.take(10)}'")
     webrtc.setLocalDescription(offer)
     unsafeOutput(Offer(msg))
     // TODO: Send offer to Websocket
@@ -59,7 +92,7 @@ class WebRtcPipeline[F[_]: Sync] private(pipe: Pipeline, webrtc: WebRTCBin, outp
 
   val onIceCandidate: ON_ICE_CANDIDATE =  (sdpMLineIndex, candidate) => {
     println(s"New ICE Candidate: $sdpMLineIndex, $candidate")
-    unsafeOutput(IceCandidate(candidate))
+    unsafeOutput(IceCandidate(candidate, sdpMLineIndex))
 
     // TODO: Send ICE candidate to websocket
     /*
@@ -138,6 +171,8 @@ class WebRtcPipeline[F[_]: Sync] private(pipe: Pipeline, webrtc: WebRTCBin, outp
     webrtc.connect(onIceCandidate)
     webrtc.connect(onIncomingStream)
 
+    setupPipeLogging()
+
     val changeReturn = pipe.play()
     println(s"Play: $changeReturn")
 
@@ -152,8 +187,8 @@ object WebRtcPipeline {
     + " ! queue ! application/x-rtp,media=video,encoding-name=VP8,payload=97 ! webrtcbin. "
     + "audiotestsrc is-live=true wave=sine ! audioconvert ! audioresample ! queue ! opusenc ! rtpopuspay"
     + " ! queue ! application/x-rtp,media=audio,encoding-name=OPUS,payload=96 ! webrtcbin. "
-    + "webrtcbin name=webrtcbin bundle-policy=max-bundle ";
-    //+ "webrtcbin name=webrtcbin bundle-policy=max-bundle stun-server=stun://stun.l.google.com:19302 ";
+    //+ "webrtcbin name=webrtcbin bundle-policy=max-bundle ";
+    + "webrtcbin name=webrtcbin bundle-policy=max-bundle stun-server=stun://stun.l.google.com:19302 ";
 
   def create[F[_]: Async](gst: Gst[F]): Resource[F, WebRtcPipeline[F]] = for {
     dispatcher <- Dispatcher.sequential[F]
