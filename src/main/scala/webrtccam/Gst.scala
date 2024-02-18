@@ -3,6 +3,7 @@ package webrtccam
 import cats.effect.Sync
 import cats.effect.kernel.Resource
 import cats.syntax.all.*
+import org.freedesktop.gstreamer.glib.GLib
 import org.freedesktop.gstreamer.webrtc.WebRTCBin
 import org.freedesktop.gstreamer.{Element, Pipeline, State, Version, Gst as JGst}
 import org.typelevel.log4cats.Logger
@@ -33,6 +34,8 @@ object Gst {
   def initialize[F[_]: Sync](): Resource[F, Gst[F]] = Resource.make {
     logger.info("Initializing GStreamer") *>
     Sync[F].blocking {
+      // Uncomment to output GStreamer debug information
+      // GLib.setEnv("GST_DEBUG", "4", true);
       JGst.init(Version.of(1, 16))
       new Gst()
     }
