@@ -2,6 +2,8 @@ ThisBuild / version := "0.1.0-SNAPSHOT"
 
 ThisBuild / scalaVersion := "3.3.1"
 
+ThisBuild / semanticdbEnabled := true
+
 val http4sVersion = "0.23.24"
 val circeVersion = "0.14.1"
 

@@ -1,7 +1,9 @@
 package webrtccam
 
-import java.security.{KeyStore, Security}
-import javax.net.ssl.{KeyManagerFactory, SSLContext}
+import java.security.KeyStore
+import java.security.Security
+import javax.net.ssl.KeyManagerFactory
+import javax.net.ssl.SSLContext
 
 /*
   565  openssl req -x509 -newkey rsa:4096 -sha256 -days 3650   -nodes -keyout example.com.key -out example.com.crt -subj "/CN=example.com"   -addext "subjectAltName=DNS:example.com,DNS:*.example.com,IP:192.168.50.143
