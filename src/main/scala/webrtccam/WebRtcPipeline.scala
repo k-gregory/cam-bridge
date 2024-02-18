@@ -122,7 +122,8 @@ class WebRtcPipeline[F[_]: Sync] private(pipe: Pipeline, webrtc: WebRTCBin, outp
       if (caps.isAlwaysCompatible(Caps.fromString("video/x-raw"))) {
         val q = ElementFactory.make("queue", "videoqueue");
         val conv = ElementFactory.make("videoconvert", "videoconvert");
-        val sink = ElementFactory.make("autovideosink", "videosink");
+        val sink = ElementFactory.make("v4l2sink", "videosink");
+        sink.set("device", "/dev/video9")
         pipe.addMany(q, conv, sink);
         q.syncStateWithParent();
         conv.syncStateWithParent();

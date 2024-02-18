@@ -69,6 +69,7 @@ class WebsocketWebrtc {
     this.localStream.getVideoTracks().forEach(track => this.pc.addTrack(track, this.localStream));
 
     const offer = await this.pc.createOffer();
+    //const noBandwidthSdp = offer.sdp.replace(/b=AS:.*\r\n/, '').replace(/b=TIAS:.*\r\n/, '');
     this.pc.setLocalDescription({type: "offer", sdp: offer.sdp});
     this.send({
       Offer: {type: "offer", data: offer.sdp}
