@@ -1,7 +1,6 @@
 package webrtccam
 
 import scala.concurrent.Future
-
 import cats.Applicative
 import cats.data.OptionT
 import cats.effect.Async
@@ -10,20 +9,11 @@ import cats.effect.kernel.Resource
 import cats.effect.std.Dispatcher
 import cats.effect.std.Queue
 import cats.syntax.all.*
-
 import webrtccam.data.IceCandidate
 import webrtccam.data.Offer
 import webrtccam.data.WebRtcMessage
-
-import org.freedesktop.gstreamer.Bus
-import org.freedesktop.gstreamer.Caps
-import org.freedesktop.gstreamer.Element
+import org.freedesktop.gstreamer.{Bus, Caps, Element, ElementFactory, GstObject, PadDirection, Pipeline, Promise, SDPMessage}
 import org.freedesktop.gstreamer.Element.PAD_ADDED
-import org.freedesktop.gstreamer.ElementFactory
-import org.freedesktop.gstreamer.GstObject
-import org.freedesktop.gstreamer.PadDirection
-import org.freedesktop.gstreamer.Pipeline
-import org.freedesktop.gstreamer.SDPMessage
 import org.freedesktop.gstreamer.elements.DecodeBin
 import org.freedesktop.gstreamer.webrtc.WebRTCBin
 import org.freedesktop.gstreamer.webrtc.WebRTCBin.CREATE_ANSWER
@@ -51,8 +41,9 @@ class WebRtcPipeline[F[_]: Sync] private (
   private def stopOutput = dispatcher.unsafeRunAndForget(output.offer(None))
 
   def addBrowserIceCandidate(msg: IceCandidate): F[Unit] = {
-    println(s"Adding browser ICE candidate $msg")
     Sync[F].blocking {
+      Thread.sleep(1000)
+      println(s"Adding browser ICE candidate $msg")
       webrtc.addIceCandidate(msg.mLineIdx, msg.sdp)
     }
   }
@@ -81,6 +72,8 @@ class WebRtcPipeline[F[_]: Sync] private (
   }
 
   def setSdp(offerType: String, sdp: String): F[Unit] = {
+    println(s"Setting SDP, $offerType, $sdp")
+
     val sdpMessage = new SDPMessage()
     sdpMessage.parseBuffer(sdp)
     val sdpDescription = new WebRTCSessionDescription(
@@ -92,7 +85,19 @@ class WebRtcPipeline[F[_]: Sync] private (
     )
 
     Sync[F].delay {
-      webrtc.setRemoteDescription(sdpDescription)
+      //webrtc.setRemoteDescription(sdpDescription)
+
+      val promise = new Promise();
+      // the raw WebRTCBin element gets ownership of the description so it must be disown in order to prevent it from being deallocated
+      sdpDescription.disown();
+      webrtc.emit("set-remote-description", sdpDescription, promise);
+      println(promise.waitResult())
+      promise.dispose()
+      //promise.interrupt();
+      //promise.dispose();
+
+      println("Requesting webrtcbin to create answer")
+      webrtc.createAnswer(onAnswerCreated)
     }
   }
 
@@ -110,8 +115,9 @@ class WebRtcPipeline[F[_]: Sync] private (
     // send SDP offer over the websocket to signalling server
 
     Future {
-      Thread.sleep(2000)
-      webrtc.createAnswer(onAnswerCreated)
+      Thread.sleep(1000)
+      //println("Requesting webrtcbin to create answer")
+      //webrtc.createAnswer(onAnswerCreated)
     }(scala.concurrent.ExecutionContext.global)
     // webrtc.createOffer(onOfferCreated)
   }
