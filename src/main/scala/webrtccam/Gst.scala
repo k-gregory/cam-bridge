@@ -3,6 +3,7 @@ package webrtccam
 import cats.effect.Sync
 import cats.effect.kernel.Resource
 import cats.syntax.all.*
+import org.freedesktop.gstreamer.webrtc.WebRTCBin
 import org.freedesktop.gstreamer.{Pipeline, State, Version, Gst as JGst}
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
@@ -13,7 +14,15 @@ class Gst[F[_]: Sync] private {
   def parseLaunch(description: String): Resource[F, Pipeline] = Resource
     .make {
       logger.info(s"Launching pipeline: $description") *> 
-        Sync[F].blocking { JGst.parseLaunch(description).asInstanceOf[Pipeline] }
+        Sync[F].blocking {
+          JGst.parseLaunch(description) match
+            case w: WebRTCBin =>
+              val p = new Pipeline("my-pipeline")
+              p.add(w)
+              p
+            case p: Pipeline =>
+              p
+        }
     } { pipeline =>
       logger.info(s"Stopping pipeline") *>
         Sync[F].blocking { pipeline.setState(State.NULL) }

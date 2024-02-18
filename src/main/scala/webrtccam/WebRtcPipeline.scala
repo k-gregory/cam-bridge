@@ -127,10 +127,10 @@ class WebRtcPipeline[F[_]: Sync] private(pipe: Pipeline, webrtc: WebRTCBin, outp
   };
 
   val onDecodedStream: PAD_ADDED =  (element, pad) => {
-    if (!pad.hasCurrentCaps()) {
+    if (!pad.hasCurrentCaps) {
       println("Pad has no current Caps - ignoring");
     } else {
-      val caps = pad.getCurrentCaps()
+      val caps = pad.getCurrentCaps
       println(s"Received decoded stream with caps: $caps")
 
       if (caps.isAlwaysCompatible(Caps.fromString("video/x-raw"))) {
@@ -183,7 +183,9 @@ class WebRtcPipeline[F[_]: Sync] private(pipe: Pipeline, webrtc: WebRTCBin, outp
 object WebRtcPipeline {
   implicit def logger[F[_]: Sync]: Logger[F] = Slf4jLogger.getLogger[F]
 
-  private val pipelineDescription = "videotestsrc is-live=true pattern=ball ! videoconvert ! queue ! vp8enc deadline=1 ! rtpvp8pay"
+  private val pipelineDescription =
+    ""
+    + "videotestsrc is-live=true pattern=ball ! videoconvert ! queue ! vp8enc deadline=1 ! rtpvp8pay"
     + " ! queue ! application/x-rtp,media=video,encoding-name=VP8,payload=97 ! webrtcbin. "
     //+ "audiotestsrc is-live=true wave=sine ! audioconvert ! audioresample ! queue ! opusenc ! rtpopuspay"
     //+ " ! queue ! application/x-rtp,media=audio,encoding-name=OPUS,payload=96 ! webrtcbin. "
