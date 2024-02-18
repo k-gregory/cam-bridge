@@ -77,6 +77,9 @@ class WebsocketWebrtc {
   constructor(onVideoStream, localStream) {
     this.conn = new WebSocket(`wss://${window.location.host}/signaling`);
     this.conn.onmessage = this.onMessage.bind(this);
+    setInterval(() => {
+      this.send({PingPong: {}})
+    }, 10000)
     this.pc = null;
     this.onVideoStream = onVideoStream;  
     console.log("constructed with localStream", localStream);
