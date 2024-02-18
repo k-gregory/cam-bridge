@@ -9,6 +9,14 @@ const e = React.createElement;
 
 var i = 0;
 
+const oldLog = console.log;
+console.log = function() {
+  oldLog.apply(console, arguments);
+  //alert(JSON.stringify(arguments));
+}
+
+window.onerror = (err) => console.log(err);
+
 class WebsocketWebrtc {
   async onMessage(message) {
     const msg = JSON.parse(message.data);
@@ -56,9 +64,6 @@ class WebsocketWebrtc {
     this.pc = new RTCPeerConnection();
     window.pc = this.pc;
     this.pc.onicecandidate = this.onIceCandidate.bind(this);
-    this.pc.ondatachannel = (chan) => {
-      console.log("Data channel", chan);
-    }
     this.pc.ontrack = (track) => {
       console.log("Track", track);
       console.log("Track kind", track.track.kind)
@@ -66,19 +71,22 @@ class WebsocketWebrtc {
         this.onVideoStream(track.streams[0])
       }
     }
+    this.localStream.getVideoTracks().forEach(track => this.pc.addTrack(track, this.localStream));    
   }
 
-  constructor(onVideoStream) {
+  constructor(onVideoStream, localStream) {
     this.conn = new WebSocket(`wss://${window.location.host}/signaling`);
     this.conn.onmessage = this.onMessage.bind(this);
     this.pc = null;
-    this.onVideoStream = onVideoStream;
+    this.onVideoStream = onVideoStream;  
+    console.log("constructed with localStream", localStream);
+    this.localStream = localStream;
   }
 }
 
 class LikeButton extends React.Component {
   async startWebrtc() {
-    this.webrtc = new WebsocketWebrtc((video) => this.videoRef.current.srcObject = video);
+    this.webrtc = new WebsocketWebrtc((video) => this.videoRef.current.srcObject = video, this.localStream);    
   }
 
   constructor(props) {
@@ -94,7 +102,8 @@ class LikeButton extends React.Component {
     this.videos = [];
   }
 
-  handleSuccess(stream) {
+  handleSuccess(stream) {    
+
     const video = this.videoRef.current;
 
     const videoTracks = stream.getVideoTracks();
@@ -105,6 +114,7 @@ class LikeButton extends React.Component {
     console.log(`Using video device: ${videoTracks[0].label}`);
     window.stream = stream; // make variable available to browser console
     video.srcObject = stream;
+    this.localStream = stream;
   }
 
   async changeDevice(newDevice) {

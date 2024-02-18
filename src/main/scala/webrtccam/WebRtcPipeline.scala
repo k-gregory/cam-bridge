@@ -117,7 +117,7 @@ class WebRtcPipeline[F[_]: Sync] private(pipe: Pipeline, webrtc: WebRTCBin, outp
 
     println(s"Receiving stream! Element: ${element.getName} Pad: ${pad.getName} Direction: $padDirection")
 
-    if(padDirection != PadDirection.SRC) {
+    if(padDirection == PadDirection.SRC) {
       val decodeBin = new DecodeBin("decodebin_" + pad.getName())
       decodeBin.connect(onDecodedStream)
       pipe.add(decodeBin)
@@ -187,8 +187,8 @@ object WebRtcPipeline {
     + " ! queue ! application/x-rtp,media=video,encoding-name=VP8,payload=97 ! webrtcbin. "
     + "audiotestsrc is-live=true wave=sine ! audioconvert ! audioresample ! queue ! opusenc ! rtpopuspay"
     + " ! queue ! application/x-rtp,media=audio,encoding-name=OPUS,payload=96 ! webrtcbin. "
-    //+ "webrtcbin name=webrtcbin bundle-policy=max-bundle ";
-    + "webrtcbin name=webrtcbin bundle-policy=max-bundle stun-server=stun://stun.l.google.com:19302 ";
+    + "webrtcbin name=webrtcbin bundle-policy=max-bundle ";
+    //+ "webrtcbin name=webrtcbin bundle-policy=max-bundle stun-server=stun://stun.l.google.com:19302 ";
 
   def create[F[_]: Async](gst: Gst[F]): Resource[F, WebRtcPipeline[F]] = for {
     dispatcher <- Dispatcher.sequential[F]
