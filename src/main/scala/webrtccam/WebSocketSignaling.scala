@@ -1,48 +1,60 @@
 package webrtccam
 
-import cats.effect.{IO, Sync}
-import cats.effect.kernel.{Async, Ref}
-import cats.implicits.catsSyntaxApplyOps
+import cats.effect.Sync
+import cats.effect.kernel.Async
+import cats.implicits.none
+import cats.syntax.all.*
 import fs2.Pipe
+import io.circe.syntax.EncoderOps
+
+import webrtccam.data.IceCandidate
+import webrtccam.data.Offer
+import webrtccam.data.PingPong
+import webrtccam.data.WebRtcMessage
+
 import org.http4s.websocket.WebSocketFrame
-import webrtccam.data.{IceCandidate, Offer, PingPong, WebRtcMessage}
+import org.typelevel.log4cats.Logger
+import org.typelevel.log4cats.slf4j.Slf4jLogger
 
 class WebSocketSignaling[F[_]: Async](gst: Gst[F]) {
-  def pipe: Pipe[F, WebSocketFrame, WebSocketFrame] = stream => for {
-    wsp <- fs2.Stream.resource(WebRtcPipeline.create(gst))
-    _ <- fs2.Stream.eval(wsp.run())
+  import WebSocketSignaling.*
 
-    inputs = stream.map(Left(_))
-    outputs = wsp.q.map(Right(_))
+  private def handleWebRtcMessage(
+      wsp: WebRtcPipeline[F],
+      message: WebRtcMessage
+  ): F[Option[WebRtcMessage]] = message match {
+    case PingPong => (PingPong: WebRtcMessage).some.pure[F]
 
-    response <- fs2.Stream.emit(Right(PingPong)).merge(inputs.mergeHaltBoth(outputs))
+    case IceCandidate(candidate, mLineIdx) =>
+      wsp.addBrowserIceCandidate(IceCandidate(candidate, mLineIdx)) *> none
+        .pure[F]
 
-    x <- response match {
-      case Left(input @ WebSocketFrame.Text (x, _) ) =>
-        import io.circe.parser._
-        println(x)
-        val wspF= decode[WebRtcMessage](x).toOption.get match
-          case PingPong =>
-            import cats.syntax.all.*
-            fs2.Stream.emit((PingPong: WebRtcMessage).pure[F])
-          case msg @ IceCandidate(candidate, mLineIdx) =>
-            println(s"Got candidate from browser: $candidate, $mLineIdx")
-            fs2.Stream.eval(wsp.addBrowserIceCandidate(msg)) *> fs2.Stream.empty
-          case Offer(offerType, data) =>
-            println(s"Got $offerType from browser: $data")
-            fs2.Stream.eval(wsp.setSdp(offerType, data)) *> fs2.Stream.empty
-        import io.circe.syntax._
-        wspF.flatMap(fs2.Stream.eval).map(_.asJson.toString).map(WebSocketFrame.Text(_))
+    case Offer(offerType, data) =>
+      wsp.setSdp(offerType, data) *> none.pure[F]
+  }
 
-      case Right(output) =>
-        import io.circe.syntax._
-        fs2.Stream.emit(WebSocketFrame.Text(output.asJson.toString))
-    }
-  } yield x
+  def pipe: Pipe[F, WebSocketFrame, WebSocketFrame] = stream =>
+    for {
+      wsp <- fs2.Stream.resource(WebRtcPipeline.create(gst))
+      _ <- fs2.Stream.eval(wsp.run())
+
+      inputs = stream
+        .collect { case WebSocketFrame.Text(value, true) =>
+          io.circe.parser.decode[WebRtcMessage](value)
+        }
+        .evalMap {
+          case Right(msg) =>
+            handleWebRtcMessage(wsp, msg)
+
+          case Left(err) =>
+            logger.error(err)("Failed to decode WebSocket input")
+              *> none.pure[F]
+        }
+
+      response <- inputs.unNone.mergeHaltBoth(wsp.q)
+    } yield WebSocketFrame.Text(response.asJson.noSpaces, true)
 }
 
 object WebSocketSignaling {
-  def create(gst: Gst[IO]): IO[WebSocketSignaling[IO]] = for {
-    mvar <- Ref[IO].of(1)
-  } yield new WebSocketSignaling[IO](gst)
+  implicit def logger[F[_]: Sync]: Logger[F] = Slf4jLogger.getLogger[F]
 }

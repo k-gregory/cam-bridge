@@ -1,7 +1,7 @@
 package webrtccam.data
 
-import io.circe._, io.circe.generic.semiauto._
-
+import io.circe._
+import io.circe.generic.semiauto._
 
 sealed trait WebRtcMessage
 case class IceCandidate(sdp: String, mLineIdx: Int) extends WebRtcMessage
@@ -11,4 +11,3 @@ case object PingPong extends WebRtcMessage
 object WebRtcMessage {
   given Codec[WebRtcMessage] = deriveCodec
 }
-

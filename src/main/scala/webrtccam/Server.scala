@@ -1,29 +1,33 @@
 package webrtccam
 
-import cats.effect.{IO, IOApp, Resource, Sync}
-import com.comcast.ip4s.*
+import java.util.logging.LogManager
+import scala.util.Using
+
+import cats.effect.IO
+import cats.effect.IOApp
+import cats.effect.Resource
+import cats.effect.Sync
 import fs2.io.net.tls.TLSContext
+
+import com.comcast.ip4s.*
 import org.http4s.Status.Ok
+import org.http4s.*
 import org.http4s.dsl.io.*
 import org.http4s.ember.server.*
 import org.http4s.implicits.*
 import org.http4s.server.Router
-import org.http4s.server.middleware.{ErrorAction, ErrorHandling}
+import org.http4s.server.middleware.ErrorAction
+import org.http4s.server.middleware.ErrorHandling
 import org.http4s.server.staticcontent.resourceServiceBuilder
 import org.http4s.server.websocket.WebSocketBuilder2
-import org.http4s.*
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
-
-import java.util.logging.LogManager
-import scala.util.Using
 
 object Server extends IOApp.Simple {
   implicit def logger[F[_]: Sync]: Logger[F] = Slf4jLogger.getLogger[F]
 
   def errorHandler(t: Throwable, msg: => String): IO[Unit] =
     logger[IO].error(t)(msg)
-
 
   def helloWorldService(fileCache: Map[String, String]) = HttpRoutes.of[IO] {
     case GET -> Root =>
@@ -38,19 +42,20 @@ object Server extends IOApp.Simple {
       Ok(s"Hello, $name.")
   }
 
-  def httpApp(gst: Gst[IO], wsBuilder: WebSocketBuilder2[IO], fileCache: Map[String, String]) = Router(
-    "/signaling" -> HttpRoutes.of[IO] {
-      case GET -> Root =>
-        for {
-          signaling <- WebSocketSignaling.create(gst)
-          r <- wsBuilder.build(signaling.pipe)
-        } yield r
+  def httpApp(
+      gst: Gst[IO],
+      wsBuilder: WebSocketBuilder2[IO],
+      fileCache: Map[String, String]
+  ) = Router(
+    "/signaling" -> HttpRoutes.of[IO] { case GET -> Root =>
+      val signaling = new WebSocketSignaling(gst)
+      wsBuilder.build(signaling.pipe)
     },
     "/" -> helloWorldService(fileCache),
     "assets" -> resourceServiceBuilder[IO]("/assets").toRoutes
   ).orNotFound
 
-  //sudo iptables -I INPUT -p tcp -m tcp --dport 8443 -j ACCEPT
+  // sudo iptables -I INPUT -p tcp -m tcp --dport 8443 -j ACCEPT
 
   def server(gst: Gst[IO], fileCache: Map[String, String]) = EmberServerBuilder
     .default[IO]
@@ -68,11 +73,15 @@ object Server extends IOApp.Simple {
     }
     .build
 
-  def readResourceRaw(name: String): String = Using.resource(getClass.getClassLoader.getResourceAsStream(name)) { stream =>
-    scala.io.Source.fromInputStream(stream).mkString
-  }
+  def readResourceRaw(name: String): String =
+    Using.resource(getClass.getClassLoader.getResourceAsStream(name)) {
+      stream =>
+        scala.io.Source.fromInputStream(stream).mkString
+    }
 
-  def readResource(name: String): IO[String] = IO.blocking { readResourceRaw(name) }
+  def readResource(name: String): IO[String] = IO.blocking {
+    readResourceRaw(name)
+  }
 
   def createFileCache: IO[Map[String, String]] = for {
     index <- readResource("index.html")
@@ -88,5 +97,6 @@ object Server extends IOApp.Simple {
       gst <- Gst.initialize[IO]()
       fileCache <- Resource.eval(createFileCache)
       serv <- server(gst, fileCache)
-    } yield ()}.use {_ => IO.never }
+    } yield ()
+  }.use { _ => IO.never }
 }
