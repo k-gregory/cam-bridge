@@ -1,7 +1,6 @@
 package webrtccam
 
-import cats.effect.{IO, IOApp, Resource}
-import cats.syntax.all.*
+import cats.effect.{IO, IOApp, Resource, Sync}
 import com.comcast.ip4s.*
 import fs2.io.net.tls.TLSContext
 import org.http4s.Status.Ok
@@ -9,14 +8,23 @@ import org.http4s.dsl.io.*
 import org.http4s.ember.server.*
 import org.http4s.implicits.*
 import org.http4s.server.Router
+import org.http4s.server.middleware.{ErrorAction, ErrorHandling}
 import org.http4s.server.staticcontent.resourceServiceBuilder
 import org.http4s.server.websocket.WebSocketBuilder2
-import org.http4s.{HttpRoutes, StaticFile}
+import org.http4s.*
+import org.typelevel.log4cats.Logger
+import org.typelevel.log4cats.slf4j.Slf4jLogger
 
 import java.util.logging.LogManager
 import scala.util.Using
 
 object Server extends IOApp.Simple {
+  implicit def logger[F[_]: Sync]: Logger[F] = Slf4jLogger.getLogger[F]
+
+  def errorHandler(t: Throwable, msg: => String): IO[Unit] =
+    logger[IO].error(t)(msg)
+
+
   def helloWorldService(fileCache: Map[String, String]) = HttpRoutes.of[IO] {
     case GET -> Root =>
       fileCache("index")
@@ -30,10 +38,13 @@ object Server extends IOApp.Simple {
       Ok(s"Hello, $name.")
   }
 
-  def httpApp(wsBuilder: WebSocketBuilder2[IO], fileCache: Map[String, String]) = Router(
+  def httpApp(gst: Gst[IO], wsBuilder: WebSocketBuilder2[IO], fileCache: Map[String, String]) = Router(
     "/signaling" -> HttpRoutes.of[IO] {
       case GET -> Root =>
-        wsBuilder.build(WebSocketSignaling.pipe)
+        for {
+          signaling <- WebSocketSignaling.create(gst)
+          r <- wsBuilder.build(signaling.pipe)
+        } yield r
     },
     "/" -> helloWorldService(fileCache),
     "assets" -> resourceServiceBuilder[IO]("/assets").toRoutes
@@ -41,13 +52,19 @@ object Server extends IOApp.Simple {
 
   //sudo iptables -I INPUT -p tcp -m tcp --dport 8443 -j ACCEPT
 
-  def server(fileCache: Map[String, String]) = EmberServerBuilder
+  def server(gst: Gst[IO], fileCache: Map[String, String]) = EmberServerBuilder
     .default[IO]
     .withTLS(TLSContext.Builder.forAsync[IO].fromSSLContext(Tls.context))
     .withHost(ipv4"0.0.0.0")
     .withPort(port"8443")
     .withHttpWebSocketApp { wsBuilder =>
-      httpApp(wsBuilder, fileCache)
+      ErrorHandling.Recover.total(
+        ErrorAction.log(
+          httpApp(gst, wsBuilder, fileCache),
+          messageFailureLogAction = errorHandler,
+          serviceErrorLogAction = errorHandler
+        )
+      )
     }
     .build
 
@@ -65,15 +82,11 @@ object Server extends IOApp.Simple {
     for {
       _ <- Resource.eval(IO.delay {
         Using(getClass.getResourceAsStream("/log.config")) { f =>
-          //println(scala.io.Source.fromInputStream(f).getLines().mkString("\n"))
           LogManager.getLogManager.readConfiguration(f)
         }
       })
       gst <- Gst.initialize[IO]()
-      gstPipeline <- WebRtcPipeline.create[IO](gst)
       fileCache <- Resource.eval(createFileCache)
-      serv <- server(fileCache)
-    } yield gstPipeline}.use {pipeline =>
-    pipeline.run[IO]() *> IO.never
-  }
+      serv <- server(gst, fileCache)
+    } yield ()}.use {_ => IO.never }
 }

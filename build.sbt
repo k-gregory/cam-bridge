@@ -3,6 +3,7 @@ ThisBuild / version := "0.1.0-SNAPSHOT"
 ThisBuild / scalaVersion := "3.3.1"
 
 val http4sVersion = "0.23.24"
+val circeVersion = "0.14.1"
 
 lazy val root = (project in file("."))
   .settings(
@@ -24,7 +25,13 @@ lazy val root = (project in file("."))
     libraryDependencies += "org.slf4j" % "slf4j-reload4j" % "2.0.12",
     libraryDependencies += "org.typelevel" %% "log4cats-slf4j"   % "2.6.0",
 
-    libraryDependencies += "org.freedesktop.gstreamer" % "gst1-java-core" % "1.4.0"
+    libraryDependencies += "org.freedesktop.gstreamer" % "gst1-java-core" % "1.4.0",
+
+    libraryDependencies ++= Seq(
+      "io.circe" %% "circe-core",
+      "io.circe" %% "circe-generic",
+      "io.circe" %% "circe-parser"
+    ).map(_ % circeVersion)
   )
 
 

@@ -1,26 +1,42 @@
 package webrtccam
 
+import cats.Applicative
 import cats.data.OptionT
-import cats.{Applicative, Monad}
-import cats.effect.{Async, Sync}
 import cats.effect.kernel.Resource
-import cats.effect.std.Dispatcher
+import cats.effect.std.{Dispatcher, Queue}
+import cats.effect.{Async, Sync}
 import cats.syntax.all.*
 import org.freedesktop.gstreamer.Element.PAD_ADDED
-import org.freedesktop.gstreamer.{Caps, ElementFactory, PadDirection, Pipeline, SDPMessage}
 import org.freedesktop.gstreamer.elements.DecodeBin
 import org.freedesktop.gstreamer.webrtc.WebRTCBin.{CREATE_OFFER, ON_ICE_CANDIDATE, ON_NEGOTIATION_NEEDED}
 import org.freedesktop.gstreamer.webrtc.{WebRTCBin, WebRTCSDPType, WebRTCSessionDescription}
+import org.freedesktop.gstreamer.{Caps, ElementFactory, PadDirection, Pipeline, SDPMessage}
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
+import webrtccam.data.{IceCandidate, Offer, WebRtcMessage}
 
-class WebRtcPipeline private(pipe: Pipeline, webrtc: WebRTCBin) {
-  import WebRtcPipeline._
+
+class WebRtcPipeline[F[_]: Sync] private(pipe: Pipeline, webrtc: WebRTCBin, output: Queue[F, Option[WebRtcMessage]], dispatcher: Dispatcher[F]) {
+  import WebRtcPipeline.*
+
+  val q: fs2.Stream[F, WebRtcMessage] = fs2.Stream.fromQueueNoneTerminated(output)
+
+  private def unsafeOutput(msg: WebRtcMessage): Unit = dispatcher.unsafeRunAndForget(output.offer(Some(msg)))
+  private def stopOutput = dispatcher.unsafeRunAndForget(output.offer(None))
+
+  def setSdp(sdp: String): F[Unit] = {
+    val sdpMessage = new SDPMessage()
+    sdpMessage.parseBuffer(sdp)
+    val sdpDescription = new WebRTCSessionDescription(WebRTCSDPType.ANSWER, sdpMessage)
+
+    Sync[F].delay(webrtc.setRemoteDescription(sdpDescription))
+  }
 
   val onOfferCreated: CREATE_OFFER = {offer =>
-    println(s"Offer was created: $offer, ${offer.getSDPMessage}")
-
+    val msg = offer.getSDPMessage.toString
+    println(s"Offer was created: $msg")
     webrtc.setLocalDescription(offer)
+    unsafeOutput(Offer(msg))
     // TODO: Send offer to Websocket
     /*
             ObjectNode rootNode = mapper.createObjectNode();
@@ -43,6 +59,7 @@ class WebRtcPipeline private(pipe: Pipeline, webrtc: WebRTCBin) {
 
   val onIceCandidate: ON_ICE_CANDIDATE =  (sdpMLineIndex, candidate) => {
     println(s"New ICE Candidate: $sdpMLineIndex, $candidate")
+    unsafeOutput(IceCandidate(candidate))
 
     // TODO: Send ICE candidate to websocket
     /*
@@ -121,13 +138,8 @@ class WebRtcPipeline private(pipe: Pipeline, webrtc: WebRTCBin) {
     webrtc.connect(onIceCandidate)
     webrtc.connect(onIncomingStream)
 
-    println(pipe.play())
-
-    val sdpMessage = new SDPMessage()
-    sdpMessage.parseBuffer("ololo kekeke")
-    val sdpDescription = new WebRTCSessionDescription(WebRTCSDPType.ANSWER, sdpMessage)
-
-    webrtc.setRemoteDescription(sdpDescription)
+    val changeReturn = pipe.play()
+    println(s"Play: $changeReturn")
 
     ().pure[F]
   }
@@ -140,9 +152,10 @@ object WebRtcPipeline {
     + " ! queue ! application/x-rtp,media=video,encoding-name=VP8,payload=97 ! webrtcbin. "
     + "audiotestsrc is-live=true wave=sine ! audioconvert ! audioresample ! queue ! opusenc ! rtpopuspay"
     + " ! queue ! application/x-rtp,media=audio,encoding-name=OPUS,payload=96 ! webrtcbin. "
-    + "webrtcbin name=webrtcbin bundle-policy=max-bundle stun-server=stun://stun.l.google.com:19302 ";
+    + "webrtcbin name=webrtcbin bundle-policy=max-bundle ";
+    //+ "webrtcbin name=webrtcbin bundle-policy=max-bundle stun-server=stun://stun.l.google.com:19302 ";
 
-  def create[F[_]: Async](gst: Gst[F]): Resource[F, WebRtcPipeline] = for {
+  def create[F[_]: Async](gst: Gst[F]): Resource[F, WebRtcPipeline[F]] = for {
     dispatcher <- Dispatcher.sequential[F]
     pipeline <- gst.parseLaunch(pipelineDescription)
 
@@ -151,5 +164,6 @@ object WebRtcPipeline {
     }.getOrRaise(new RuntimeException("Couldn't extract webrtcBin from pipeline"))
 
     webrtc <- Resource.eval(webrtcF)
-  } yield new WebRtcPipeline(pipeline, webrtc)
+    output <- Resource.eval(Queue.unbounded)
+  } yield new WebRtcPipeline[F](pipeline, webrtc, output, dispatcher)
 }

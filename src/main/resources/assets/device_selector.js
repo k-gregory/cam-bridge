@@ -7,8 +7,72 @@ const constraints = window.constraints = {
 
 const e = React.createElement;
 
+var conn = new WebSocket('wss://localhost:8443/signaling');
+
+function send(message) {
+  conn.send(JSON.stringify(message));
+}
+
+conn.onmessage = (msg)=>console.log("got message from ws: ", JSON.parse(msg.data));
+
+var  i = 0;
+
 class LikeButton extends React.Component {
   startWebrtc() {
+
+
+    var configuration = {};
+    var peerConnection = new RTCPeerConnection(configuration);
+
+    var dataChannel = peerConnection.createDataChannel("dataChannel", { reliable: true });
+
+    dataChannel.onerror = function (error) {
+      console.log("Error:", error);
+    };
+
+    dataChannel.onclose = function () {
+      console.log("Data channel is closed");
+    };
+
+    peerConnection.createOffer(function (offer) {
+      console.log("Creating offer");
+      send({
+        event: "offer",
+        data: offer
+      });
+      peerConnection.setLocalDescription(offer);
+    }, function (error) {
+      console.log("Can't create offer", error)
+    });
+
+    peerConnection.onicecandidate = function (event) {
+      if (event.candidate) {
+        send({
+          event: "candidate",
+          data: event.candidate
+        });
+      }
+    };
+
+    return;
+    peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+    peerConnection.createAnswer(function (answer) {
+      peerConnection.setLocalDescription(answer);
+      send({
+        event: "answer",
+        data: answer
+      });
+    }, function (error) {
+      console.log("Can't create answer", error)
+    });
+
+    function handleAnswer(answer){
+        peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+    }
+
+    dataChannel.onmessage = function(event) {
+        console.log("Message:", event.data);
+    };
 
   }
 
@@ -36,10 +100,6 @@ class LikeButton extends React.Component {
     video.srcObject = stream;
   }
 
-  handleVideoInput(stream) {
-   console.log(stream);
-  }
-
   async changeDevice(newDevice) {
     console.log(newDevice);
 
@@ -52,14 +112,14 @@ class LikeButton extends React.Component {
           }
         }
       }
-      console.log("new constraints:",newConstraints);
-    } catch(e) {
+      console.log("new constraints:", newConstraints);
+    } catch (e) {
       console.log("change device", e)
     }
 
     const stream = await navigator.mediaDevices.getUserMedia({
-    ...constraints,
-    ...newConstraints
+      ...constraints,
+      ...newConstraints
     });
 
     this.handleSuccess(stream);
@@ -70,20 +130,20 @@ class LikeButton extends React.Component {
     let newConstraints = null;
     let stream = null;
 
-    switch(device.kind) {
+    switch (device.kind) {
       case "videoinput":
         console.log("got video input")
         newConstraints = {
-                        video: {
-                          deviceId: {
-                            exact: device.deviceId
-                          }
-                        }
-                      };
+          video: {
+            deviceId: {
+              exact: device.deviceId
+            }
+          }
+        };
 
         stream = await navigator.mediaDevices.getUserMedia({
-            ...newConstraints
-            });
+          ...newConstraints
+        });
         const videoLabel = stream.getVideoTracks()[0].label
         console.log("video stream", stream, videoLabel)
 
@@ -94,16 +154,16 @@ class LikeButton extends React.Component {
       case "audioinput":
         console.log("got audio input")
         newConstraints = {
-                audio: {
-                  deviceId: {
-                    exact: device.deviceId
-                  }
-                }
-              };
+          audio: {
+            deviceId: {
+              exact: device.deviceId
+            }
+          }
+        };
 
         stream = await navigator.mediaDevices.getUserMedia({
-                    ...newConstraints
-                    });
+          ...newConstraints
+        });
 
         const audioLabel = stream.getAudioTracks()[0].label
         console.log("audio stream", stream, audioLabel);
@@ -119,9 +179,9 @@ class LikeButton extends React.Component {
       const deviceLabels = [];
       console.log("Devices list:", devices);
 
-      for(const device of devices) {
+      for (const device of devices) {
         const [id, label] = await this.queryDevice(device)
-        deviceLabels [id] = label;
+        deviceLabels[id] = label;
       }
 
       this.setState({ devices, deviceLabels });
@@ -141,22 +201,24 @@ class LikeButton extends React.Component {
           onChange: (event) => this.changeDevice(event.target.value)
         },
         this.state.devices.map((device, idx) => {
-                  var x = 'unknown';
-                  try {
-                    x = this.state.deviceLabels[this.state.devices[idx].deviceId];
-                    if(!x) x = 'unknown';
-                  } catch(e) {
-                  console.log("err", e)
-                  }
-          return e('option', {key : idx, value: idx}, x)
+          var x = 'unknown';
+          try {
+            x = this.state.deviceLabels[this.state.devices[idx].deviceId];
+            if (!x) x = 'unknown';
+          } catch (e) {
+            console.log("err", e)
+          }
+          return e('option', { key: idx, value: idx }, x)
         })
       ),
-      e('button', {onClick: () => this.startWebrtc()}, 'Device initialization WebRTC',  ),
-      e('button', {onClick: () => this.startWebrtc()}, 'Device initialization WebRTC',  ),
+      e('button', { onClick: () => this.deviceInitialization() }, 'Device initialization',),
+      e('button', { onClick: () => this.startWebrtc() }, 'Start WebRTC',),
+      e('button', { onClick: () => send({data: "I'm sending something", i: i++}) }, 'Send something',),
       e('video', {
         ref: this.videoRef,
         'autoPlay': 1,
-        'playsInline': 1}
+        'playsInline': 1
+      }
       )
     )
   }
