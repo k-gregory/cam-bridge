@@ -26,11 +26,14 @@ class WebSocketSignaling[F[_]: Async](gst: Gst[F]) {
     case PingPong => (PingPong: WebRtcMessage).some.pure[F]
 
     case IceCandidate(candidate, mLineIdx) =>
-      wsp.addBrowserIceCandidate(IceCandidate(candidate, mLineIdx)) *> none
-        .pure[F]
+      logger.info(s"got $candidate $mLineIdx") *>
+        wsp.addBrowserIceCandidate(IceCandidate(candidate, mLineIdx)) *>
+        none.pure[F]
 
     case Offer(offerType, data) =>
-      wsp.setSdp(offerType, data) *> none.pure[F]
+      logger.info(s"Got offer message $offerType, $data") *>
+        wsp.setSdp(offerType, data) *>
+        none.pure[F]
   }
 
   def pipe: Pipe[F, WebSocketFrame, WebSocketFrame] = stream =>

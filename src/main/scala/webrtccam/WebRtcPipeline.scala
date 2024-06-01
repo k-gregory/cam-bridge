@@ -1,7 +1,6 @@
 package webrtccam
 
 import scala.concurrent.Future
-
 import cats.Applicative
 import cats.data.OptionT
 import cats.effect.Async
@@ -10,20 +9,11 @@ import cats.effect.kernel.Resource
 import cats.effect.std.Dispatcher
 import cats.effect.std.Queue
 import cats.syntax.all.*
-
 import webrtccam.data.IceCandidate
 import webrtccam.data.Offer
 import webrtccam.data.WebRtcMessage
-
-import org.freedesktop.gstreamer.Bus
-import org.freedesktop.gstreamer.Caps
-import org.freedesktop.gstreamer.Element
+import org.freedesktop.gstreamer.{Bus, Caps, Element, ElementFactory, GstObject, PadDirection, Pipeline, Promise, SDPMessage}
 import org.freedesktop.gstreamer.Element.PAD_ADDED
-import org.freedesktop.gstreamer.ElementFactory
-import org.freedesktop.gstreamer.GstObject
-import org.freedesktop.gstreamer.PadDirection
-import org.freedesktop.gstreamer.Pipeline
-import org.freedesktop.gstreamer.SDPMessage
 import org.freedesktop.gstreamer.elements.DecodeBin
 import org.freedesktop.gstreamer.webrtc.WebRTCBin
 import org.freedesktop.gstreamer.webrtc.WebRTCBin.CREATE_ANSWER
@@ -48,11 +38,12 @@ class WebRtcPipeline[F[_]: Sync] private (
 
   private def unsafeOutput(msg: WebRtcMessage): Unit =
     dispatcher.unsafeRunAndForget(output.offer(Some(msg)))
-  private def stopOutput = dispatcher.unsafeRunAndForget(output.offer(None))
+  private def stopOutput(): Unit = dispatcher.unsafeRunAndForget(output.offer(None))
 
   def addBrowserIceCandidate(msg: IceCandidate): F[Unit] = {
-    println(s"Adding browser ICE candidate $msg")
     Sync[F].blocking {
+      Thread.sleep(1000)
+      println(s"Adding browser ICE candidate $msg")
       webrtc.addIceCandidate(msg.mLineIdx, msg.sdp)
     }
   }
@@ -62,12 +53,12 @@ class WebRtcPipeline[F[_]: Sync] private (
 
     val eos: Bus.EOS = source => {
       println(s"Reached end of stream $source")
-      // endCall();
+      stopOutput()
     }
 
     val error: Bus.ERROR = (source, code, message) => {
       println(s"Error from source $source with code $code and message $message")
-      // endCall();
+      stopOutput()
     };
 
     bus.connect(eos)
@@ -81,6 +72,8 @@ class WebRtcPipeline[F[_]: Sync] private (
   }
 
   def setSdp(offerType: String, sdp: String): F[Unit] = {
+    println(s"setSdp(), $offerType, $sdp")
+
     val sdpMessage = new SDPMessage()
     sdpMessage.parseBuffer(sdp)
     val sdpDescription = new WebRTCSessionDescription(
@@ -92,7 +85,11 @@ class WebRtcPipeline[F[_]: Sync] private (
     )
 
     Sync[F].delay {
+      println("Setting remote description")
       webrtc.setRemoteDescription(sdpDescription)
+
+      println("Requesting webrtcbin to create answer")
+      webrtc.createAnswer(onAnswerCreated)
     }
   }
 
@@ -105,15 +102,6 @@ class WebRtcPipeline[F[_]: Sync] private (
 
   val onNegotiationNeeded: ON_NEGOTIATION_NEEDED = { elem =>
     println(s"Negotiation needed: $elem")
-
-    // When webrtcbin has created the offer, it will hit our callback and we
-    // send SDP offer over the websocket to signalling server
-
-    Future {
-      Thread.sleep(2000)
-      webrtc.createAnswer(onAnswerCreated)
-    }(scala.concurrent.ExecutionContext.global)
-    // webrtc.createOffer(onOfferCreated)
   }
 
   val onIceCandidate: ON_ICE_CANDIDATE = (sdpMLineIndex, candidate) => {
@@ -181,8 +169,7 @@ class WebRtcPipeline[F[_]: Sync] private (
 
     setupPipeLogging()
 
-    val changeReturn = pipe.play()
-    println(changeReturn)
+    pipe.play()
 
     ().pure[F]
   }

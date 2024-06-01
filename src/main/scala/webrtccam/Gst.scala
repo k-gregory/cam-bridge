@@ -40,7 +40,7 @@ object Gst {
     logger.info("Initializing GStreamer") *>
       Sync[F].blocking {
         // Uncomment to output GStreamer debug information
-        // GLib.setEnv("GST_DEBUG", "4", true);
+        GLib.setEnv("GST_DEBUG", "3", true);
         JGst.init(Version.of(1, 16))
         new Gst()
       }
