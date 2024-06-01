@@ -43,15 +43,17 @@ class WebsocketWebrtc {
 
   onIceCandidate(candidate0) {
     const candidate = candidate0.candidate;
+    if(candidate != null) {
     console.log("Got ice candidate", candidate0, candidate);    
     this.send({ IceCandidate: {
       mLineIdx: candidate.sdpMLineIndex,
       sdp: candidate.candidate
     }});
+    }
   }
 
   send(msg) {
-    console.log(this.conn);
+    console.log("Sending", msg);
     this.conn.send(JSON.stringify(msg));
   }
 

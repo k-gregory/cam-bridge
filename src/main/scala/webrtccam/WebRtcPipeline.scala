@@ -38,7 +38,7 @@ class WebRtcPipeline[F[_]: Sync] private (
 
   private def unsafeOutput(msg: WebRtcMessage): Unit =
     dispatcher.unsafeRunAndForget(output.offer(Some(msg)))
-  private def stopOutput = dispatcher.unsafeRunAndForget(output.offer(None))
+  private def stopOutput(): Unit = dispatcher.unsafeRunAndForget(output.offer(None))
 
   def addBrowserIceCandidate(msg: IceCandidate): F[Unit] = {
     Sync[F].blocking {
@@ -53,12 +53,12 @@ class WebRtcPipeline[F[_]: Sync] private (
 
     val eos: Bus.EOS = source => {
       println(s"Reached end of stream $source")
-      // endCall();
+      stopOutput()
     }
 
     val error: Bus.ERROR = (source, code, message) => {
       println(s"Error from source $source with code $code and message $message")
-      // endCall();
+      stopOutput()
     };
 
     bus.connect(eos)
@@ -72,7 +72,7 @@ class WebRtcPipeline[F[_]: Sync] private (
   }
 
   def setSdp(offerType: String, sdp: String): F[Unit] = {
-    println(s"Setting SDP, $offerType, $sdp")
+    println(s"setSdp(), $offerType, $sdp")
 
     val sdpMessage = new SDPMessage()
     sdpMessage.parseBuffer(sdp)
@@ -85,16 +85,8 @@ class WebRtcPipeline[F[_]: Sync] private (
     )
 
     Sync[F].delay {
-      //webrtc.setRemoteDescription(sdpDescription)
-
-      val promise = new Promise();
-      // the raw WebRTCBin element gets ownership of the description so it must be disown in order to prevent it from being deallocated
-      sdpDescription.disown();
-      webrtc.emit("set-remote-description", sdpDescription, promise);
-      println(promise.waitResult())
-      promise.dispose()
-      //promise.interrupt();
-      //promise.dispose();
+      println("Setting remote description")
+      webrtc.setRemoteDescription(sdpDescription)
 
       println("Requesting webrtcbin to create answer")
       webrtc.createAnswer(onAnswerCreated)
@@ -110,16 +102,6 @@ class WebRtcPipeline[F[_]: Sync] private (
 
   val onNegotiationNeeded: ON_NEGOTIATION_NEEDED = { elem =>
     println(s"Negotiation needed: $elem")
-
-    // When webrtcbin has created the offer, it will hit our callback and we
-    // send SDP offer over the websocket to signalling server
-
-    Future {
-      Thread.sleep(1000)
-      //println("Requesting webrtcbin to create answer")
-      //webrtc.createAnswer(onAnswerCreated)
-    }(scala.concurrent.ExecutionContext.global)
-    // webrtc.createOffer(onOfferCreated)
   }
 
   val onIceCandidate: ON_ICE_CANDIDATE = (sdpMLineIndex, candidate) => {
@@ -187,8 +169,7 @@ class WebRtcPipeline[F[_]: Sync] private (
 
     setupPipeLogging()
 
-    val changeReturn = pipe.play()
-    println(changeReturn)
+    pipe.play()
 
     ().pure[F]
   }
