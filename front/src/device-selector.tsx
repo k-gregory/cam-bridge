@@ -4,12 +4,13 @@ class GumManager {
     constructor() {
     }
 
-    private activeStream?: MediaStream;
+    activeStream?: MediaStream;
 
     async initialize() {
-        await navigator.mediaDevices.getUserMedia({
+        this.activeStream = await navigator.mediaDevices.getUserMedia({
             video: true,            
         });
+        console.log(this.activeStream)        
     }
 
     async fetchDevices(): Promise<MediaDeviceInfo[]> {
@@ -25,17 +26,18 @@ class GumManager {
                     exact: mediaDevice.deviceId
                 }
             },
-            audio: true
+            //audio: true
         };
 
 
         console.log(deviceConstraint);
         const res = await navigator.mediaDevices.getUserMedia(deviceConstraint);
-        console.log(res);
-        return res;
+        this.activeStream = res;
+        console.log(this.activeStream);
+        return this.activeStream;
     }
 
-    close() {
+    close() {        
         this.activeStream?.getTracks().forEach((track) => track.stop())
     }
 }
@@ -44,27 +46,31 @@ export function DeviceSelector(props: {
     onStream: (stream: MediaStream)=>void
 }) {
     const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
-
     const [selectedDevice, setSelectedDevice] = useState<MediaDeviceInfo | null>(null);
+    const [deviceSelected, setDeviceSelected] = useState(false);
 
     useEffect(() => {
-        console.log("DeviceSelector, useEffect 1")
+        console.log("DeviceSelector, useEffect 1", deviceSelected);
         const gum = new GumManager();
 
         async function deviceInitialization() {
             await gum.initialize();
             setDevices(await gum.fetchDevices());
+            if(gum.activeStream) {
+                props.onStream(gum.activeStream);
+            }
+
         }
-        deviceInitialization();
+        if(!deviceSelected) deviceInitialization();
 
         return () => {
-            console.log("Disposing DeviceSelector, useEffect 1")
+            console.log("Disposing DeviceSelector, useEffect 1", deviceSelected)
             gum.close();
         }
-    }, [])
+    }, [deviceSelected])
 
     useEffect(() => {
-        console.log("DeviceSelector, useEffect 2")
+        console.log("DeviceSelector, useEffect 2", selectedDevice)
         console.log("Selected device", selectedDevice)
         const gum = new GumManager();
         async function changeDevice(device: MediaDeviceInfo) {
@@ -73,11 +79,12 @@ export function DeviceSelector(props: {
         }
 
         if (selectedDevice) {
+            setDeviceSelected(true);
             changeDevice(selectedDevice);
         }
 
         return () => {
-            console.log("Disposing DeviceSelector, useEffect 2")
+            console.log("Disposing DeviceSelector, useEffect 2", selectedDevice)
             gum.close();
         }
     }, [selectedDevice])
