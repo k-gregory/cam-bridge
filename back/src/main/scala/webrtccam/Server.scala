@@ -47,7 +47,7 @@ object Server extends IOApp.Simple {
       wsBuilder: WebSocketBuilder2[IO],
       fileCache: Map[String, String]
   ) = Router(
-    "/signaling" -> HttpRoutes.of[IO] { case GET -> Root =>
+    "/api/signaling" -> HttpRoutes.of[IO] { case GET -> Root =>
       val signaling = new WebSocketSignaling(gst)
       wsBuilder.build(signaling.pipe)
     },
