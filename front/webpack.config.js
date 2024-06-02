@@ -2,7 +2,7 @@ const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 
 module.exports = {
-  entry: './src/index.ts',
+  entry: './src/index.tsx',
   mode: 'development',
   devtool: 'inline-source-map',
   devServer: {
@@ -23,14 +23,18 @@ module.exports = {
   
   plugins: [
     new HtmlWebpackPlugin({
-      title: 'CamBridge',
+      template: "./src/index.html"
     }),
 
   ],
+
+  resolve: {
+    extensions: ['.ts', '.tsx', '.js']
+  },
   
   module: {
     rules: [
-      { test: /\.ts$/, use: 'ts-loader' },
+      { test: /\.tsx?$/, use: 'ts-loader', exclude: /node_modules/ },
     ]
   },
 
